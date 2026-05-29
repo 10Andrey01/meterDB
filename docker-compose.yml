@@ -1,0 +1,124 @@
+version: '3.8'
+
+services:
+  postgres:
+    build: .
+    container_name: meter_readings_postgres
+    restart: unless-stopped
+    environment:
+      # Основные настройки PostgreSQL
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres123}
+      POSTGRES_DB: ${POSTGRES_DB:-meter_readings_db}
+      
+      # Дополнительные настройки
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=ru_RU.UTF-8 --lc-ctype=ru_RU.UTF-8"
+      PGDATA: /var/lib/postgresql/data/pgdata
+      
+      # Параметры производительности
+      POSTGRES_SHARED_BUFFERS: ${POSTGRES_SHARED_BUFFERS:-256MB}
+      POSTGRES_WORK_MEM: ${POSTGRES_WORK_MEM:-16MB}
+      POSTGRES_MAINTENANCE_WORK_MEM: ${POSTGRES_MAINTENANCE_WORK_MEM:-128MB}
+      POSTGRES_EFFECTIVE_CACHE_SIZE: ${POSTGRES_EFFECTIVE_CACHE_SIZE:-1GB}
+      POSTGRES_MAX_CONNECTIONS: ${POSTGRES_MAX_CONNECTIONS:-200}
+      
+      # Логирование
+      POSTGRES_LOG_STATEMENT: ddl
+      POSTGRES_LOG_MIN_DURATION_STATEMENT: 1000
+      POSTGRES_LOG_DIRECTORY: /var/log/postgresql
+      
+    volumes:
+      # Постоянное хранение данных
+      - postgres_data:/var/lib/postgresql/data
+      # Кастомная конфигурация
+      - ./config/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./config/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      # Логи
+      - ./logs:/var/log/postgresql
+      # Бэкапы
+      - ./backup:/var/backups/postgres
+      # Скрипты
+      - ./scripts:/scripts:ro
+      
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+      
+    networks:
+      - meter_readings_network
+      
+    healthcheck:
+      test: ["CMD-SHELL", "/scripts/healthcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+      
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+          
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Опциональный сервис для резервного копирования
+  backup:
+    image: alpine:latest
+    container_name: meter_readings_backup
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    volumes:
+      - ./backup:/backup
+      - ./scripts:/scripts:ro
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-meter_readings_db}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres123}
+      BACKUP_SCHEDULE: "0 2 * * *"  # Ежедневно в 2:00
+      BACKUP_RETENTION_DAYS: 30
+    entrypoint: /bin/sh
+    command: -c "apk add --no-cache postgresql-client && crond -f"
+    networks:
+      - meter_readings_network
+
+  # Опциональный сервис для мониторинга
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: meter_readings_pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@example.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin123}
+      PGADMIN_CONFIG_SERVER_MODE: 'False'
+    ports:
+      - "${PGADMIN_PORT:-8080}:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - meter_readings_network
+    depends_on:
+      - postgres
+    profiles:
+      - monitoring
+
+networks:
+  meter_readings_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  postgres_data:
+    driver: local
+  pgadmin_data:
+    driver: local
