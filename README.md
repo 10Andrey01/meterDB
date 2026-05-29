@@ -1,5 +1,4 @@
-# meterDB
-PostgreSQL Database for Meter Readings Management
+# meterDB PostgreSQL Database for Meter Readings Management
 
 # Docker контейнер для PostgreSQL с БД показаний счетчиков
 
